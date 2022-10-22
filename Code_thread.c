@@ -27,7 +27,6 @@ Return value meaning
 0  The element pointed by p1 is equivalent to the element pointed by p2
 >0 The element pointed by p1 goes after the element pointed by p2
 
-Source: http://www.cplusplus.com/reference/cstdlib/qsort/
 */
 int comp(const void* p, const void* q) {
     int l = ((pair*)p)->x, r = ((pair*)q)->x;
