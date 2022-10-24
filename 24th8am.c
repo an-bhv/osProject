@@ -1,0 +1,311 @@
+#include <stdio.h> 
+#include <stdbool.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <string.h>
+#define MAXN 50
+
+int N;
+// direction of moves
+int dx[] = { 2, 1, -1, -2, -2, -1, 1, 2 };
+int dy[] = { 1, 2, 2, 1, -1, -2, -2, -1 };
+
+// Helper struct, can utilize any other custom structs if needed 
+typedef struct {
+    int x, y;
+} pair;
+
+int StartX, StartY;
+
+int comp(const void* p, const void* q) {
+    int l = ((pair*)p)->x, r = ((pair*)q)->x;
+    if (l == r) {
+        l = ((pair*)p)->y, r = ((pair*)q)->y;
+        return l - r;
+    }
+    return l - r;
+}
+
+pair order[MAXN * MAXN];
+
+// check if cell is valid or not
+bool valid(int x, int y) {
+    return 0 <= x && x < N && 0 <= y && y < N;
+}
+
+// calculates number of moves that can be made from this cell
+int moves(int x, int y, int** grid) {
+    int cnt = 0;
+    for (int i = 0; i < 8; ++i) {
+        int X = x + dx[i], Y = y + dy[i];
+        if (valid(X, Y) && !grid[X][Y]) cnt++;
+    }
+    return cnt;
+}
+
+// prints path and tests if output is valid or not
+void print_path(pair path[], int n) {
+    {
+        bool vis[N][N];
+        for (int i = 0; i < n; ++i) {
+            // checking if each coordinate is valid or not
+            assert(valid(path[i].x, path[i].y));
+
+            vis[path[i].x][path[i].y] = true;
+
+            // checking if difference in moves is valid or not
+            if (i > 0) {
+                int X = path[i].x - path[i - 1].x;
+                int Y = path[i].y - path[i - 1].y;
+
+                bool seen = false;
+                for (int j = 0; j < 8; ++j) {
+                    if (X == dx[j] && Y == dy[j]) {
+                        seen = true;
+                        break;
+                    }
+                }
+
+                assert(seen);
+            }
+        }
+
+        // checking if all cells are visited or not
+        for (int i = 0; i < N; ++i)
+            for (int j = 0; j < N; ++j)
+                assert(vis[i][j]);
+    }
+
+    for (int i = 0; i < n; i++) {
+        printf("%d,%d|", path[i].x, path[i].y);
+    }
+}
+
+typedef struct {
+    int x, y, cnt, ** grid;
+} state;
+
+bool done = false;
+pthread_mutex_t lock;
+
+void* closed_dfs(void* input) {
+    if (done) return NULL;
+    state* now = (state*)input;
+    int x = now->x, y = now->y, cnt = now->cnt;
+    now->grid[x][y] = cnt;
+
+    // grid is filled
+    if (cnt == N * N && !done) {
+        pthread_mutex_lock(&lock);
+        if (done) return NULL;
+        bool isclosed = false;
+        int stx = 0, sty = 0, endx = 0, endy = 0;
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N; j++) {
+                if (now->grid[i][j] == 1) {
+                    stx = i;
+                    sty = j;
+                }
+                if (now->grid[i][j] == N * N) {
+                    endx = i;
+                    endy = j;
+                }
+            }
+        }
+
+        for (int i = 0; i < 8; i++) {
+            int nx = stx + dx[i], ny = sty + dy[i];
+            if (nx == endx && ny == endy)
+                isclosed = true;
+        }
+        if (isclosed) {
+            done = 1;
+            //printf("Starting at %d %d\n" , stx , sty);
+            int offset = now->grid[StartX][StartY] - 1;
+            for (int i = 0; i < N; i++) {
+                for (int j = 0; j < N; j++) {
+                    int final = (now->grid[i][j] > offset) ? (now->grid[i][j] - offset)
+                        : (now->grid[i][j] - offset + N * N);
+                    order[final - 1].x = i;
+                    order[final - 1].y = j;
+
+                }
+            }
+            print_path(order, now->cnt);
+            exit(0);
+        }
+        pthread_mutex_unlock(&lock);
+        pthread_exit(NULL);
+    }
+
+    pair nxt[8];
+    int len = 0;
+    for (int i = 0; i < 8; ++i) {
+        int X = now->x + dx[i], Y = now->y + dy[i];
+        if (!valid(X, Y) || now->grid[X][Y]) continue;
+        nxt[len].x = moves(X, Y, now->grid);
+        nxt[len].y = i;
+        len++;
+    }
+
+    if (len > 0) {
+        qsort((void*)nxt, len, sizeof(nxt[0]), comp);
+        int sz = 1;
+        for (int i = 1; i < len; ++i)
+            if (nxt[i].x == nxt[0].x) sz++;
+            else break;
+        int id = rand() % sz;
+        now->cnt = cnt + 1;
+        now->x = x + dx[nxt[id].y];
+        now->y = y + dy[nxt[id].y];
+        closed_dfs(now);
+    }
+}
+
+void* open_dfs(void* input) {
+    if (done) return NULL;
+    state* now = (state*)input;
+    now->grid[now->x][now->y] = now->cnt;
+
+    // grid is filled
+    if (now->cnt == N * N && !done) {
+        pthread_mutex_lock(&lock);
+        if (done) return NULL;
+        done = 1;
+
+        for (int i = 0; i < N; ++i) {
+            for (int j = 0; j < N; ++j) {
+                order[now->grid[i][j] - 1].x = i;
+                order[now->grid[i][j] - 1].y = j;
+            }
+        }
+
+        print_path(order, now->cnt);
+        pthread_mutex_unlock(&lock);
+        pthread_exit(NULL);
+        exit(0);
+    }
+
+    // finding for all valid neigbours the number of moves they can make and sorting
+    pair nxt[8];
+    int len = 0;
+    for (int i = 0; i < 8; ++i) {
+        int X = now->x + dx[i], Y = now->y + dy[i];
+        if (!valid(X, Y) || now->grid[X][Y]) continue;
+        nxt[len].x = moves(X, Y, now->grid);
+        nxt[len].y = i;
+        len++;
+    }
+
+    if (len > 0) {
+        qsort((void*)nxt, len, sizeof(nxt[0]), comp);
+        if (now->cnt % 5 == 0) {
+            pthread_t ttid[len];
+            for (int i = 0; i < len; ++i) {
+                pthread_t tid;
+
+                state* lol = (state*)malloc(sizeof(state*));
+
+                lol->x = now->x + dx[nxt[i].y];
+                lol->y = now->y + dy[nxt[i].y];
+                lol->cnt = now->cnt + 1;
+
+                lol->grid = (int**)malloc(N * sizeof(int*));
+                for (int i = 0; i < N; ++i) {
+                    lol->grid[i] = (int*)malloc(N * sizeof(int));
+                    for (int j = 0; j < N; ++j)
+                        lol->grid[i][j] = now->grid[i][j];
+                }
+
+                pthread_create(&tid, NULL, open_dfs, (void*)lol);
+                ttid[i] = tid;
+            }
+
+            for (int i = 0; i < len; ++i)
+                pthread_join(ttid[i], NULL);
+        } else {
+            for (int i = 0; i < len; ++i) {
+                state* lol = (state*)malloc(sizeof(state*));
+
+                lol->x = now->x + dx[nxt[i].y];
+                lol->y = now->y + dy[nxt[i].y];
+                lol->cnt = now->cnt + 1;
+
+                lol->grid = (int**)malloc(N * sizeof(int*));
+                for (int i = 0; i < N; ++i) {
+                    lol->grid[i] = (int*)malloc(N * sizeof(int));
+                    for (int j = 0; j < N; ++j)
+                        lol->grid[i][j] = now->grid[i][j];
+                }
+
+                open_dfs((void*)lol);
+            }
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 4) {
+        printf("Usage: ./Knight.out grid_size StartX StartY");
+        exit(-1);
+    }
+
+    N = atoi(argv[1]);
+    StartX = atoi(argv[2]);
+    StartY = atoi(argv[3]);
+
+
+    if (N % 2) {
+        if (((StartX + StartY) % 2) || N <= 4)
+            printf("No Possible Tour\n");
+        else {
+            state* Start = (state*)malloc(sizeof(state*));
+
+            Start->x = StartX;
+            Start->y = StartY;
+            Start->cnt = 1;
+
+            Start->grid = (int**)malloc(N * sizeof(int*));
+            for (int i = 0; i < N; ++i)
+                Start->grid[i] = (int*)malloc(N * sizeof(int));
+
+            pthread_mutex_init(&lock, NULL);
+
+            open_dfs(Start);
+
+            if (!done)
+                printf("No Possible Tour\n");
+        }
+    } else {
+    	if(N <= 4) {
+    		printf("No Possible Tour\n");
+    		exit(0);
+    	}
+        pthread_mutex_init(&lock, NULL);
+        while (1) {
+            pthread_t threads[N * N];
+            int c = 0;
+            for (int i = 0; i < N; i++) {
+                for (int j = 0; j < N; j++) {
+                    state* Start = (state*)malloc(sizeof(state*));
+                    Start->x = i;
+                    Start->y = j;
+                    Start->cnt = 1;
+
+                    Start->grid = (int**)malloc(N * sizeof(int*));
+                    for (int i = 0; i < N; ++i)
+                        Start->grid[i] = (int*)malloc(N * sizeof(int));
+
+                    pthread_create(&threads[c], NULL, closed_dfs, (void*)Start);
+                    c++;
+                }
+            }
+            for (int i = 0; i < N * N; i++)
+                pthread_join(threads[i], NULL);
+        }
+    }
+
+    return 0;
+}
