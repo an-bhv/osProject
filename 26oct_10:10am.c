@@ -7,7 +7,7 @@
 #include <string.h>
 #include <semaphore.h>
 #define MAXN 50
-#define MAX_THREAD_CNT 100
+#define MAX_THREAD_CNT 200
 
 int N;
 // direction of moves
